@@ -231,8 +231,6 @@
   .empty strong { font-family: var(--font-display); font-size: 1.5rem; letter-spacing: 0.04em; text-transform: uppercase; color: var(--ink); }
   .empty p { margin: 0 auto; max-width: 40ch; }
 
-  .note { margin: 0; font-family: var(--font-mono); font-size: 0.75rem; color: var(--ink-2); }
-
   @media (min-width: 761px) { .panel { position: sticky; top: 16px; } }
   @media (max-width: 760px) { .layout { grid-template-columns: minmax(0, 1fr); } }
   @media (max-width: 400px) { .ticket { --stub: 96px; } .when-time { font-size: 1.35rem; } }
@@ -294,7 +292,6 @@
       </div>
       <p class="banner" id="banner" role="status" hidden></p>
       <div id="list"></div>
-      <p class="note" id="note"></p>
     </section>
   </div>
 </div>
@@ -529,7 +526,6 @@
       if (next) s += " · next pickup " + (relLabel(next.date) || dateLabel(next.date)) + " " + next.time;
     }
     $("summary").textContent = s;
-    $("note").textContent = "Shared by all staff. This screen refreshes every 10 seconds.";
   }
 
   /* ---------- form ---------- */
