@@ -51,20 +51,33 @@ async function initDb() {
   await pool.query(STAFF_USERS_SQL);
 }
 
-// On first start, STAFF_USER and STAFF_PASSWORD create the first staff login.
-// After that the staff_users table is the source of truth; changing the variables does nothing.
-async function seedFirstUser() {
-  const existing = await pool.query('SELECT 1 FROM staff_users LIMIT 1');
-  if (existing.rows.length) return;
-  const password = process.env.STAFF_PASSWORD || '';
-  if (!password) return;
-  const username = (process.env.STAFF_USER || 'staff').trim().toLowerCase();
-  if (!/^[a-z0-9._-]{2,40}$/.test(username) || password.length < 8) {
-    console.warn('STAFF_USER or STAFF_PASSWORD is not valid (password needs 8+ characters). First login not created.');
-    return;
+// Logins named in the variables are created at startup if they do not exist yet:
+//   STAFF_USER + STAFF_PASSWORD           one login
+//   STAFF_LOGINS=anna:pass1234,ben:pass5678   any number of extra logins
+// An existing login is never changed by the variables; use scripts/add-user.js to reset a password.
+function loginsFromEnv() {
+  const list = [];
+  if (process.env.STAFF_PASSWORD) list.push([process.env.STAFF_USER || 'staff', process.env.STAFF_PASSWORD]);
+  String(process.env.STAFF_LOGINS || '').split(',').forEach((raw) => {
+    const entry = raw.trim();
+    const i = entry.indexOf(':');
+    if (i > 0) list.push([entry.slice(0, i), entry.slice(i + 1)]);
+  });
+  return list;
+}
+
+async function seedLogins() {
+  for (const [rawUser, password] of loginsFromEnv()) {
+    const username = rawUser.trim().toLowerCase();
+    if (!/^[a-z0-9._-]{2,40}$/.test(username) || password.length < 8) {
+      console.warn(`Skipped login "${rawUser.trim()}": the username needs 2-40 letters, numbers, . _ - and the password needs 8+ characters.`);
+      continue;
+    }
+    const existing = await pool.query('SELECT 1 FROM staff_users WHERE username = $1', [username]);
+    if (existing.rows.length) continue;
+    await pool.query('INSERT INTO staff_users (username, password_hash) VALUES ($1, $2)', [username, await hashPassword(password)]);
+    console.log(`Created staff login "${username}".`);
   }
-  await pool.query('INSERT INTO staff_users (username, password_hash) VALUES ($1, $2)', [username, await hashPassword(password)]);
-  console.log(`Created first staff login "${username}".`);
 }
 
 function toOrder(r) {
@@ -251,7 +264,7 @@ async function start() {
   for (let attempt = 1; ; attempt++) {
     try {
       await initDb();
-      await seedFirstUser();
+      await seedLogins();
       break;
     } catch (err) {
       if (attempt >= 8) {
