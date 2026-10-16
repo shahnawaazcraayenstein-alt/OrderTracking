@@ -10,6 +10,7 @@ Order tracker for restaurant staff. Staff sign in, add an order (name, surname, 
 4. Open the web service, go to **Variables**, and add:
    - `DATABASE_URL` with the value `${{Postgres.DATABASE_URL}}` (use your database service's name if it is not "Postgres").
    - `STAFF_USER` and `STAFF_PASSWORD` for the first staff login (password at least 8 characters).
+   - Optional `STAFF_LOGINS` for more logins, for example `anna:ovenhot99,ben:dough12345`.
 5. Under **Settings > Networking**, click **Generate Domain**, then open the link and sign in.
 
 The `orders` and `staff_users` tables are created automatically on first start.
@@ -18,14 +19,14 @@ The `orders` and `staff_users` tables are created automatically on first start.
 
 Logins live in the `staff_users` table. Passwords are stored as salted scrypt hashes, never as plain text, so they cannot be typed into the table by hand.
 
-- **First login:** on the first start, if the table is empty, `STAFF_USER` and `STAFF_PASSWORD` create it. After that the variables are ignored, so changing them does not change the password.
-- **More logins, or a password reset:** run this against the same database (for example in a shell on the Railway service, or locally with `DATABASE_URL` set):
+- **First login:** `STAFF_USER` and `STAFF_PASSWORD` create it on start.
+- **More logins:** add a variable `STAFF_LOGINS` with entries in the form `username:password`, separated by commas, for example `anna:ovenhot99,ben:dough12345`, then redeploy. Passwords need 8+ characters and cannot contain a comma.
+- Logins named in the variables are only created if they do not exist yet. Changing a password in the variables does not change an existing login. Removing a login from the variables does not delete it.
+- **Password reset:** run this against the same database (for example in a shell on the Railway service, or locally with `DATABASE_URL` set). If the username already exists, its password is replaced:
 
   ```
   node scripts/add-user.js <username> <password>
   ```
-
-  If the username already exists, its password is replaced.
 - Until at least one login exists, the site shows a message instead of the orders.
 - After 10 wrong logins from one address, that address is blocked for 10 minutes.
 - A login that has just been verified is trusted for one minute, so a changed password can take up to a minute to apply.
