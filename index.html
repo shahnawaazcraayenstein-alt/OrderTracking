@@ -1,0 +1,609 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Pizza Order Book</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=Barlow:wght@400;500;600&family=IBM+Plex+Mono:wght@500;600&display=swap">
+<style>
+  html { color-scheme: light; }
+  body { margin: 0; }
+  [hidden] { display: none !important; }
+
+  /* Layout: order form on the left, a kitchen-ticket rail on the right; stacks to one column on phones. */
+  :root {
+    --bg: #E8ECEE;
+    --panel: #F6F8F9;
+    --paper: #FFFFFF;
+    --paper-dim: #EEF1F2;
+    --ink: #172126;
+    --ink-2: #4A5961;
+    --line: #C3CCD1;
+    --accent: #C42F1A;
+    --accent-ink: #FFFFFF;
+    --ok: #2C7A4B;
+    --ok-bg: #E1F1E8;
+    --ok-solid: #25693F;
+    --ok-ink: #FFFFFF;
+    --focus: #1D6FB8;
+    --font-display: "Barlow Condensed", "Arial Narrow", "Helvetica Neue", Arial, sans-serif;
+    --font-body: "Barlow", "Helvetica Neue", Arial, sans-serif;
+    --font-mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #12171A;
+      --panel: #192024;
+      --paper: #20292E;
+      --paper-dim: #1A2125;
+      --ink: #E8EEF0;
+      --ink-2: #9FAEB5;
+      --line: #34424A;
+      --accent: #EE6A52;
+      --accent-ink: #1C0E0B;
+      --ok: #6CC896;
+      --ok-bg: #1B3326;
+      --ok-solid: #5DBB88;
+      --ok-ink: #08210F;
+      --focus: #6DB3F2;
+      color-scheme: dark;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #12171A;
+    --panel: #192024;
+    --paper: #20292E;
+    --paper-dim: #1A2125;
+    --ink: #E8EEF0;
+    --ink-2: #9FAEB5;
+    --line: #34424A;
+    --accent: #EE6A52;
+    --accent-ink: #1C0E0B;
+    --ok: #6CC896;
+    --ok-bg: #1B3326;
+    --ok-solid: #5DBB88;
+    --ok-ink: #08210F;
+    --focus: #6DB3F2;
+    color-scheme: dark;
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    background: var(--bg);
+    color: var(--ink);
+    font-family: var(--font-body);
+    font-size: 16px;
+    line-height: 1.5;
+    padding-block: 28px 44px;
+    padding-left: max(16px, env(safe-area-inset-left, 0px));
+    padding-right: max(16px, env(safe-area-inset-right, 0px));
+  }
+  :focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
+
+  .wrap { max-width: 1080px; margin: 0 auto; display: grid; gap: 26px; }
+
+  .top { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 6px 24px; }
+  h1 {
+    margin: 0;
+    font-family: var(--font-display);
+    font-weight: 700;
+    font-size: clamp(2.2rem, 6vw, 3.4rem);
+    line-height: 1;
+    letter-spacing: 0.01em;
+    text-transform: uppercase;
+    text-wrap: balance;
+  }
+  .summary { margin: 0; font-family: var(--font-mono); font-size: 0.85rem; color: var(--ink-2); font-variant-numeric: tabular-nums; }
+
+  .layout { display: grid; grid-template-columns: minmax(280px, 360px) minmax(0, 1fr); gap: 28px; align-items: start; }
+
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 22px 20px 20px; display: grid; gap: 16px; min-width: 0; }
+  .panel h2 { margin: 0; font-family: var(--font-display); font-weight: 700; font-size: 1.6rem; letter-spacing: 0.03em; text-transform: uppercase; line-height: 1.1; }
+
+  .row { display: grid; gap: 14px; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); }
+  .field { display: grid; gap: 6px; min-width: 0; align-content: start; }
+  label { font-size: 0.78rem; font-weight: 600; letter-spacing: 0.09em; text-transform: uppercase; color: var(--ink-2); }
+  input, select {
+    width: 100%;
+    min-width: 0;
+    height: 46px;
+    padding: 0 12px;
+    font: 500 1rem/1.2 var(--font-body);
+    color: var(--ink);
+    background: var(--paper);
+    border: 1px solid var(--line);
+    border-radius: 6px;
+  }
+  input[type="date"], input[type="time"] { font-family: var(--font-mono); font-size: 0.95rem; }
+  input[aria-invalid="true"], select[aria-invalid="true"] { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
+  .err { margin: 0; font-size: 0.85rem; color: var(--accent); font-weight: 500; }
+  .err:empty { display: none; }
+
+  .submit {
+    height: 50px;
+    border: 0;
+    border-radius: 6px;
+    background: var(--accent);
+    color: var(--accent-ink);
+    font: 700 1.2rem/1 var(--font-display);
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    cursor: pointer;
+  }
+  .submit:hover { filter: brightness(1.08); }
+  .submit:disabled { opacity: 0.6; cursor: progress; }
+  .status { margin: 0; min-height: 1.4em; font-size: 0.9rem; color: var(--ok); font-weight: 500; }
+  .status.bad { color: var(--accent); }
+
+  .rail { display: grid; gap: 16px; min-width: 0; }
+  #list { display: grid; gap: 22px; }
+
+  .seg { display: inline-flex; gap: 4px; padding: 4px; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; justify-self: start; max-width: 100%; }
+  .seg button {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    height: 42px;
+    padding: 0 16px;
+    border: 0;
+    border-radius: 5px;
+    background: transparent;
+    color: var(--ink-2);
+    font: 700 1.1rem/1 var(--font-display);
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    cursor: pointer;
+  }
+  .seg button[aria-pressed="true"] { background: var(--ink); color: var(--bg); }
+  .count { font-family: var(--font-mono); font-size: 0.8rem; font-weight: 600; letter-spacing: 0; }
+
+  .banner { margin: 0; padding: 10px 14px; border: 1px solid var(--accent); border-radius: 6px; background: var(--paper); color: var(--accent); font-size: 0.9rem; font-weight: 500; }
+
+  .group { display: grid; gap: 10px; }
+  .group-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; padding-bottom: 6px; border-bottom: 2px solid var(--ink); }
+  .group-head h3 { margin: 0; font-family: var(--font-display); font-weight: 700; font-size: 1.35rem; letter-spacing: 0.04em; text-transform: uppercase; line-height: 1.1; }
+  .group-head span { font-family: var(--font-mono); font-size: 0.8rem; color: var(--ink-2); }
+
+  .ticket {
+    --stub: 112px;
+    position: relative;
+    overflow: hidden;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) var(--stub);
+    background: var(--paper);
+    border: 1px solid var(--line);
+    border-radius: 6px;
+  }
+  .ticket::before, .ticket::after {
+    content: "";
+    position: absolute;
+    right: calc(var(--stub) - 8px);
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    background: var(--bg);
+    border: 1px solid var(--line);
+  }
+  .ticket::before { top: -9px; }
+  .ticket::after { bottom: -9px; }
+  .ticket.done { background: var(--paper-dim); }
+  .ticket.done .who, .ticket.done .when-time { color: var(--ink-2); }
+
+  .ticket-main { padding: 14px 16px 10px; display: grid; gap: 4px; align-content: start; min-width: 0; }
+  .who { margin: 0; font-family: var(--font-display); font-weight: 700; font-size: 1.55rem; line-height: 1.1; letter-spacing: 0.02em; text-transform: uppercase; overflow-wrap: anywhere; }
+  .who small { display: block; font-weight: 500; font-size: 1rem; letter-spacing: 0.05em; color: var(--ink-2); }
+  .pizza { margin: 6px 0 0; display: flex; align-items: center; gap: 8px; font-weight: 600; overflow-wrap: anywhere; }
+  .pizza svg { flex: none; color: var(--accent); }
+
+  .actions { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 16px; margin-top: 8px; }
+  .btn-done, .btn-reopen {
+    height: 42px;
+    padding: 0 16px;
+    border-radius: 6px;
+    font: 700 1.05rem/1 var(--font-display);
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    cursor: pointer;
+  }
+  .btn-done { border: 0; background: var(--ok-solid); color: var(--ok-ink); }
+  .btn-done:hover { filter: brightness(1.08); }
+  .btn-reopen { border: 1px solid var(--line); background: var(--paper); color: var(--ink); }
+  .btn-done:disabled, .btn-reopen:disabled { opacity: 0.6; cursor: progress; }
+  .remove {
+    padding: 10px 0;
+    border: 0;
+    background: none;
+    font: 500 0.85rem var(--font-body);
+    color: var(--ink-2);
+    text-decoration: underline;
+    text-underline-offset: 3px;
+    cursor: pointer;
+  }
+  .remove.armed { color: var(--accent); font-weight: 600; }
+
+  .ticket-stub { border-left: 2px dashed var(--line); padding: 14px 8px; display: grid; gap: 6px; justify-items: center; align-content: center; text-align: center; }
+  .when-time { font-family: var(--font-mono); font-weight: 600; font-size: 1.6rem; line-height: 1; font-variant-numeric: tabular-nums; }
+  .when-date { font-family: var(--font-mono); font-size: 0.78rem; color: var(--ink-2); }
+  .chip { font-family: var(--font-body); font-size: 0.68rem; font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase; padding: 2px 8px; border-radius: 999px; background: var(--ok-bg); color: var(--ok); font-variant-numeric: tabular-nums; }
+  .chip.late { background: var(--accent); color: var(--accent-ink); }
+
+  .empty { border: 2px dashed var(--line); border-radius: 8px; padding: 36px 22px; text-align: center; color: var(--ink-2); display: grid; gap: 6px; }
+  .empty strong { font-family: var(--font-display); font-size: 1.5rem; letter-spacing: 0.04em; text-transform: uppercase; color: var(--ink); }
+  .empty p { margin: 0 auto; max-width: 40ch; }
+
+  .note { margin: 0; font-family: var(--font-mono); font-size: 0.75rem; color: var(--ink-2); }
+
+  @media (min-width: 761px) { .panel { position: sticky; top: 16px; } }
+  @media (max-width: 760px) { .layout { grid-template-columns: minmax(0, 1fr); } }
+  @media (max-width: 400px) { .ticket { --stub: 96px; } .when-time { font-size: 1.35rem; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <h1>Pizza Order Book</h1>
+    <p class="summary" id="summary" aria-live="polite"></p>
+  </header>
+
+  <div class="layout">
+    <form id="orderForm" class="panel" novalidate>
+      <h2>New order</h2>
+
+      <div class="row">
+        <div class="field">
+          <label for="name">Name</label>
+          <input id="name" name="name" type="text" autocomplete="off" maxlength="40" aria-describedby="err-name">
+          <p class="err" id="err-name"></p>
+        </div>
+        <div class="field">
+          <label for="surname">Surname</label>
+          <input id="surname" name="surname" type="text" autocomplete="off" maxlength="40" aria-describedby="err-surname">
+          <p class="err" id="err-surname"></p>
+        </div>
+      </div>
+
+      <div class="field">
+        <label for="pizza">Pizza</label>
+        <select id="pizza" name="pizza" aria-describedby="err-pizza">
+          <option value="">Choose a pizza</option>
+        </select>
+        <p class="err" id="err-pizza"></p>
+      </div>
+
+      <div class="row">
+        <div class="field">
+          <label for="date">Collection date</label>
+          <input id="date" name="date" type="date" aria-describedby="err-date">
+          <p class="err" id="err-date"></p>
+        </div>
+        <div class="field">
+          <label for="time">Collection time</label>
+          <input id="time" name="time" type="time" step="300" aria-describedby="err-time">
+          <p class="err" id="err-time"></p>
+        </div>
+      </div>
+
+      <button class="submit" id="submitBtn" type="submit">Add order</button>
+      <p class="status" id="formStatus" aria-live="polite"></p>
+    </form>
+
+    <section class="rail" aria-label="Orders">
+      <div class="seg" role="group" aria-label="Show orders">
+        <button type="button" id="tabOpen" aria-pressed="true">Open <span class="count" id="countOpen">0</span></button>
+        <button type="button" id="tabDone" aria-pressed="false">Completed <span class="count" id="countDone">0</span></button>
+      </div>
+      <p class="banner" id="banner" role="status" hidden></p>
+      <div id="list"></div>
+      <p class="note" id="note"></p>
+    </section>
+  </div>
+</div>
+
+<script>
+(function () {
+  var DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+  var MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  var FIELDS = ["name", "surname", "pizza", "date", "time"];
+  var POLL_MS = 10000;
+  var GRACE_MS = 5 * 60 * 1000; // an order for "right now" is still allowed
+
+  var state = { orders: [], menu: [], tab: "open", loaded: false, banner: "", sig: "", lastKey: "" };
+
+  function $(id) { return document.getElementById(id); }
+  function pad(n) { return n < 10 ? "0" + n : "" + n; }
+  function ymd(d) { return d.getFullYear() + "-" + pad(d.getMonth() + 1) + "-" + pad(d.getDate()); }
+  function parseDate(s) { var p = s.split("-"); return new Date(+p[0], +p[1] - 1, +p[2]); }
+  function when(date, time) {
+    var p = time.split(":");
+    var d = parseDate(date);
+    d.setHours(+p[0], +p[1], 0, 0);
+    return d;
+  }
+  function dateLabel(s) { var d = parseDate(s); return DAYS[d.getDay()] + " " + d.getDate() + " " + MONTHS[d.getMonth()]; }
+  function relLabel(s) {
+    var now = new Date();
+    if (s === ymd(now)) return "Today";
+    var tm = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
+    return s === ymd(tm) ? "Tomorrow" : "";
+  }
+  function clock(iso) { var d = new Date(iso); return pad(d.getHours()) + ":" + pad(d.getMinutes()); }
+  function el(tag, cls, text) {
+    var e = document.createElement(tag);
+    if (cls) e.className = cls;
+    if (text != null) e.textContent = text;
+    return e;
+  }
+
+  var SLICE = '<svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"><path d="M3 5c6-3 12-3 18 0L12 21z"/><circle cx="10" cy="9" r="1.3" fill="currentColor" stroke="none"/><circle cx="14.5" cy="11" r="1.3" fill="currentColor" stroke="none"/></svg>';
+
+  /* ---------- server ---------- */
+  async function api(method, url, body) {
+    var opts = { method: method, headers: {}, credentials: "same-origin" };
+    if (body) { opts.headers["Content-Type"] = "application/json"; opts.body = JSON.stringify(body); }
+    var res = await fetch(url, opts);
+    if (res.status === 204) return null;
+    var json = {};
+    try { json = await res.json(); } catch (e) { /* empty body */ }
+    if (!res.ok) throw new Error(json.error || "Request failed (" + res.status + ").");
+    return json;
+  }
+
+  async function load(force) {
+    try {
+      var j = await api("GET", "/api/orders");
+      state.orders = j.orders;
+      state.sig = JSON.stringify(j.orders);
+      state.banner = "";
+      state.loaded = true;
+      if (j.menu && j.menu.length && $("pizza").options.length === 1) fillMenu(j.menu);
+    } catch (e) {
+      state.banner = "Cannot reach the server. Showing the last orders loaded; trying again shortly.";
+    }
+    render(force);
+  }
+
+  function fillMenu(menu) {
+    state.menu = menu;
+    menu.forEach(function (p) {
+      var o = document.createElement("option");
+      o.value = p; o.textContent = p;
+      $("pizza").appendChild(o);
+    });
+  }
+
+  async function act(btn, fn) {
+    var failure = "";
+    btn.disabled = true;
+    try {
+      await fn();
+    } catch (e) {
+      failure = "Could not update the order. " + e.message;
+    }
+    await load(true);
+    if (failure) {
+      state.banner = failure;
+      render(true);
+    }
+  }
+
+  /* ---------- rendering ---------- */
+  function ticket(o) {
+    var isDone = o.status === "completed";
+    var t = el("article", "ticket" + (isDone ? " done" : ""));
+    var main = el("div", "ticket-main");
+
+    var who = el("p", "who", o.surname);
+    who.appendChild(el("small", null, o.name));
+    main.appendChild(who);
+
+    var pz = el("p", "pizza");
+    pz.insertAdjacentHTML("beforeend", SLICE);
+    pz.appendChild(el("span", null, o.pizza));
+    main.appendChild(pz);
+
+    var actions = el("div", "actions");
+    var primary;
+    if (isDone) {
+      primary = el("button", "btn-reopen", "Reopen");
+      primary.type = "button";
+      primary.addEventListener("click", function () {
+        act(primary, function () { return api("PATCH", "/api/orders/" + o.id, { status: "open" }); });
+      });
+    } else {
+      primary = el("button", "btn-done", "Mark completed");
+      primary.type = "button";
+      primary.addEventListener("click", function () {
+        act(primary, function () { return api("PATCH", "/api/orders/" + o.id, { status: "completed" }); });
+      });
+    }
+    actions.appendChild(primary);
+
+    var rm = el("button", "remove", "Remove");
+    rm.type = "button";
+    var timer = null;
+    rm.addEventListener("click", function () {
+      if (!rm.classList.contains("armed")) {
+        rm.classList.add("armed");
+        rm.textContent = "Tap again to remove";
+        timer = setTimeout(function () { rm.classList.remove("armed"); rm.textContent = "Remove"; }, 4000);
+        return;
+      }
+      clearTimeout(timer);
+      act(rm, function () { return api("DELETE", "/api/orders/" + o.id); });
+    });
+    actions.appendChild(rm);
+    main.appendChild(actions);
+
+    var stub = el("div", "ticket-stub");
+    stub.appendChild(el("div", "when-time", o.time));
+    stub.appendChild(el("div", "when-date", dateLabel(o.date)));
+    if (isDone) {
+      stub.appendChild(el("span", "chip", "Done " + clock(o.completedAt)));
+    } else if (when(o.date, o.time) < new Date()) {
+      stub.appendChild(el("span", "chip late", "Overdue"));
+    } else {
+      var rel = relLabel(o.date);
+      if (rel) stub.appendChild(el("span", "chip", rel));
+    }
+
+    t.appendChild(main);
+    t.appendChild(stub);
+    return t;
+  }
+
+  function group(title, items) {
+    var g = el("div", "group");
+    var head = el("div", "group-head");
+    head.appendChild(el("h3", null, title));
+    head.appendChild(el("span", null, items.length + (items.length === 1 ? " order" : " orders")));
+    g.appendChild(head);
+    items.forEach(function (o) { g.appendChild(ticket(o)); });
+    return g;
+  }
+
+  function emptyState(title, text) {
+    var e = el("div", "empty");
+    e.appendChild(el("strong", null, title));
+    if (text) e.appendChild(el("p", null, text));
+    return e;
+  }
+
+  function render(force) {
+    var now = new Date();
+    var key = [state.tab, state.sig, state.banner, state.loaded, now.getHours() + ":" + now.getMinutes()].join("|");
+    if (!force && key === state.lastKey) return;
+    state.lastKey = key;
+
+    var open = state.orders.filter(function (o) { return o.status === "open"; });
+    var done = state.orders.filter(function (o) { return o.status === "completed"; });
+    open.sort(function (a, b) { var ka = a.date + a.time, kb = b.date + b.time; return ka < kb ? -1 : ka > kb ? 1 : a.id - b.id; });
+    done.sort(function (a, b) { return a.completedAt < b.completedAt ? 1 : -1; });
+
+    $("countOpen").textContent = open.length;
+    $("countDone").textContent = done.length;
+    $("tabOpen").setAttribute("aria-pressed", state.tab === "open" ? "true" : "false");
+    $("tabDone").setAttribute("aria-pressed", state.tab === "done" ? "true" : "false");
+
+    var banner = $("banner");
+    banner.hidden = !state.banner;
+    banner.textContent = state.banner;
+
+    var list = $("list");
+    list.textContent = "";
+
+    if (!state.loaded) {
+      list.appendChild(emptyState("Loading orders"));
+    } else if (state.tab === "open") {
+      if (!open.length) {
+        list.appendChild(emptyState("No open orders", "New orders appear here until you mark them completed."));
+      }
+      var i = 0;
+      while (i < open.length) {
+        var d = open[i].date;
+        var batch = [];
+        while (i < open.length && open[i].date === d) { batch.push(open[i]); i++; }
+        var rel = relLabel(d);
+        list.appendChild(group((rel ? rel + " · " : "") + dateLabel(d), batch));
+      }
+    } else {
+      if (!done.length) {
+        list.appendChild(emptyState("Nothing completed yet", "Orders you mark completed move here and stay for 7 days."));
+      }
+      var j = 0;
+      while (j < done.length) {
+        var k = ymd(new Date(done[j].completedAt));
+        var chunk = [];
+        while (j < done.length && ymd(new Date(done[j].completedAt)) === k) { chunk.push(done[j]); j++; }
+        list.appendChild(group("Completed " + (relLabel(k) ? relLabel(k).toLowerCase() : dateLabel(k)), chunk));
+      }
+    }
+
+    var overdue = open.filter(function (o) { return when(o.date, o.time) < now; }).length;
+    var next = open.filter(function (o) { return when(o.date, o.time) >= now; })[0];
+    var s;
+    if (!state.loaded) s = "";
+    else if (!open.length) s = "All caught up";
+    else {
+      s = open.length + " open";
+      if (overdue) s += " · " + overdue + " overdue";
+      if (next) s += " · next pickup " + (relLabel(next.date) || dateLabel(next.date)) + " " + next.time;
+    }
+    $("summary").textContent = s;
+    $("note").textContent = "Shared by all staff. This screen refreshes every 10 seconds.";
+  }
+
+  /* ---------- form ---------- */
+  function setStatus(msg, bad) {
+    var s = $("formStatus");
+    s.textContent = msg;
+    s.className = "status" + (bad ? " bad" : "");
+  }
+
+  function showErrors(errs) {
+    FIELDS.forEach(function (f) {
+      $("err-" + f).textContent = errs[f] || "";
+      if (errs[f]) $(f).setAttribute("aria-invalid", "true"); else $(f).removeAttribute("aria-invalid");
+    });
+  }
+
+  function validate(v) {
+    var e = {};
+    var today = ymd(new Date());
+    if (!v.name) e.name = "Enter a name.";
+    if (!v.surname) e.surname = "Enter a surname.";
+    if (!v.pizza) e.pizza = "Choose a pizza.";
+    if (!v.date) e.date = "Pick a date.";
+    else if (v.date < today) e.date = "That date has passed.";
+    if (!v.time) e.time = "Pick a time.";
+    else if (v.date && !e.date && when(v.date, v.time) < new Date(Date.now() - GRACE_MS)) e.time = "That time has already passed.";
+    return e;
+  }
+
+  $("date").min = ymd(new Date());
+  $("date").value = ymd(new Date());
+
+  $("orderForm").addEventListener("submit", async function (ev) {
+    ev.preventDefault();
+    setStatus("", false);
+    var v = {
+      name: $("name").value.trim(),
+      surname: $("surname").value.trim(),
+      pizza: $("pizza").value,
+      date: $("date").value,
+      time: $("time").value
+    };
+    var errs = validate(v);
+    showErrors(errs);
+    var bad = FIELDS.filter(function (f) { return errs[f]; })[0];
+    if (bad) { $(bad).focus(); return; }
+
+    var btn = $("submitBtn");
+    btn.disabled = true;
+    try {
+      await api("POST", "/api/orders", v);
+      setStatus("Order added for " + v.name + " " + v.surname + ".", false);
+      $("name").value = "";
+      $("surname").value = "";
+      $("pizza").value = "";
+      $("time").value = "";
+      state.tab = "open";
+      $("name").focus();
+      await load(true);
+    } catch (e) {
+      setStatus(e.message || "The order could not be saved. Try again.", true);
+    }
+    btn.disabled = false;
+  });
+
+  $("tabOpen").addEventListener("click", function () { state.tab = "open"; render(true); });
+  $("tabDone").addEventListener("click", function () { state.tab = "done"; render(true); });
+
+  /* ---------- start ---------- */
+  render(true);
+  load(true);
+  setInterval(function () { if (!document.hidden) load(false); }, POLL_MS);
+  document.addEventListener("visibilitychange", function () { if (!document.hidden) load(false); });
+})();
+</script>
+</body>
+</html>
