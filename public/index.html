@@ -95,6 +95,11 @@
   }
   .summary { margin: 0; font-family: var(--font-mono); font-size: 0.85rem; color: var(--ink-2); font-variant-numeric: tabular-nums; }
 
+  .top-side { display: grid; gap: 2px; justify-items: end; min-width: 0; }
+  .session { margin: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 0 14px; font-family: var(--font-mono); font-size: 0.85rem; color: var(--ink-2); }
+  .signout { padding: 10px 0; border: 0; background: none; font: 600 0.9rem var(--font-body); color: var(--ink); text-decoration: underline; text-underline-offset: 3px; cursor: pointer; }
+  @media (max-width: 760px) { .top-side { justify-items: start; } }
+
   .layout { display: grid; grid-template-columns: minmax(280px, 360px) minmax(0, 1fr); gap: 28px; align-items: start; }
 
   .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 22px 20px 20px; display: grid; gap: 16px; min-width: 0; }
@@ -240,7 +245,10 @@
 <div class="wrap">
   <header class="top">
     <h1>Pizza Order Book</h1>
-    <p class="summary" id="summary" aria-live="polite"></p>
+    <div class="top-side">
+      <p class="summary" id="summary" aria-live="polite"></p>
+      <p class="session"><span id="who"></span><button type="button" class="signout" id="signOut">Sign out</button></p>
+    </div>
   </header>
 
   <div class="layout">
@@ -338,6 +346,13 @@
     var opts = { method: method, headers: {}, credentials: "same-origin" };
     if (body) { opts.headers["Content-Type"] = "application/json"; opts.body = JSON.stringify(body); }
     var res = await fetch(url, opts);
+    if (res.status === 401) {
+      // The session ended (signed out, expired or the login was removed): go back to the sign-in page.
+      window.location.replace("/login");
+      var out = new Error("Signed out.");
+      out.signedOut = true;
+      throw out;
+    }
     if (res.status === 204) return null;
     var json = {};
     try { json = await res.json(); } catch (e) { /* empty body */ }
@@ -352,8 +367,10 @@
       state.sig = JSON.stringify(j.orders);
       state.banner = "";
       state.loaded = true;
+      if (j.user) $("who").textContent = "Signed in as " + j.user;
       if (j.menu && j.menu.length && $("pizza").options.length === 1) fillMenu(j.menu);
     } catch (e) {
+      if (e && e.signedOut) return;
       state.banner = "Cannot reach the server. Showing the last orders loaded; trying again shortly.";
     }
     render(force);
@@ -593,6 +610,12 @@
 
   $("tabOpen").addEventListener("click", function () { state.tab = "open"; render(true); });
   $("tabDone").addEventListener("click", function () { state.tab = "done"; render(true); });
+
+  $("signOut").addEventListener("click", async function () {
+    $("signOut").disabled = true;
+    try { await fetch("/api/logout", { method: "POST", credentials: "same-origin" }); } catch (e) { /* leave anyway */ }
+    window.location.replace("/login");
+  });
 
   /* ---------- start ---------- */
   render(true);
