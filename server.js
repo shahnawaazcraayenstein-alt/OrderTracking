@@ -7,18 +7,16 @@ const { Pool } = require('pg');
 const { hashPassword, verifyPassword, STAFF_USERS_SQL, SESSIONS_SQL } = require('./auth');
 
 // ---------------------------------------------------------------------------
-// Settings. Edit MENU to change the pizzas offered on the order form.
+// Settings. Edit PRICES to change the pizzas offered on the order form and what they cost.
 // ---------------------------------------------------------------------------
-const MENU = [
-  'Margherita',
-  'Pepperoni',
-  'Hawaiian',
-  'BBQ Chicken',
-  'Peri-Peri Chicken',
-  'Four Cheese',
-  'Vegetarian Supreme',
-  'Meat Feast',
-];
+// Prices are in rand (R) per pizza. The menu list is built from these, in this order.
+const PRICES = {
+  'Margherita': 80,
+  'Steak': 120,
+  'Chicken': 100,
+  'Pepperoni': 100,
+};
+const MENU = Object.keys(PRICES);
 
 const PORT = process.env.PORT || 3000;
 const COMPLETED_VISIBLE_DAYS = 7; // completed orders stay in the database; the screen shows the last 7 days
@@ -46,6 +44,7 @@ async function initDb() {
       surname      TEXT NOT NULL,
       pizza        TEXT NOT NULL,
       items        TEXT,
+      total        INTEGER,
       pickup_date  TEXT NOT NULL,
       pickup_time  TEXT NOT NULL,
       status       TEXT NOT NULL DEFAULT 'open',
@@ -55,6 +54,7 @@ async function initDb() {
   `);
   // Orders made before several pizzas were supported have no items; they are shown as one pizza.
   await pool.query('ALTER TABLE orders ADD COLUMN IF NOT EXISTS items TEXT');
+  await pool.query('ALTER TABLE orders ADD COLUMN IF NOT EXISTS total INTEGER');
   await pool.query('CREATE INDEX IF NOT EXISTS orders_status_idx ON orders (status, pickup_date, pickup_time)');
   await pool.query(STAFF_USERS_SQL);
   await pool.query(SESSIONS_SQL);
@@ -101,13 +101,26 @@ function parseItems(r) {
   return [{ pizza: r.pizza, qty: 1 }];
 }
 
+// The price of an order, in rand. Null if any pizza on it is no longer on the menu.
+function priceOf(items) {
+  let total = 0;
+  for (const i of items) {
+    if (!Object.prototype.hasOwnProperty.call(PRICES, i.pizza)) return null;
+    total += PRICES[i.pizza] * i.qty;
+  }
+  return total;
+}
+
 function toOrder(r) {
+  const items = parseItems(r);
   return {
     id: r.id,
     name: r.name,
     surname: r.surname,
     pizza: r.pizza,
-    items: parseItems(r),
+    items,
+    // The price saved when the order was added; orders from before prices existed are priced from the current menu.
+    total: r.total != null ? r.total : priceOf(items),
     date: r.pickup_date,
     time: r.pickup_time,
     status: r.status,
@@ -164,7 +177,7 @@ function cleanOrder(body) {
   if (cleaned.error) return { error: cleaned.error };
   if (!isRealDate(date)) return { error: 'Pick a valid collection date.' };
   if (typeof time !== 'string' || !/^([01]\d|2[0-3]):[0-5]\d$/.test(time)) return { error: 'Pick a valid collection time.' };
-  return { value: { name, surname, items: cleaned.items, pizza: summarize(cleaned.items), date, time } };
+  return { value: { name, surname, items: cleaned.items, total: priceOf(cleaned.items), pizza: summarize(cleaned.items), date, time } };
 }
 
 function parseId(raw) {
@@ -329,16 +342,16 @@ app.get('/api/orders', wrap(async (req, res) => {
     [cutoff]
   );
   res.set('Cache-Control', 'no-store');
-  res.json({ orders: rows.map(toOrder), menu: MENU, user: req.user, limits: { maxQty: MAX_QTY, maxLines: MAX_LINES } });
+  res.json({ orders: rows.map(toOrder), menu: MENU, prices: PRICES, user: req.user, limits: { maxQty: MAX_QTY, maxLines: MAX_LINES } });
 }));
 
 app.post('/api/orders', wrap(async (req, res) => {
   const { value, error } = cleanOrder(req.body);
   if (error) return res.status(400).json({ error });
   const { rows } = await pool.query(
-    `INSERT INTO orders (name, surname, pizza, items, pickup_date, pickup_time)
-     VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,
-    [value.name, value.surname, value.pizza, JSON.stringify(value.items), value.date, value.time]
+    `INSERT INTO orders (name, surname, pizza, items, total, pickup_date, pickup_time)
+     VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *`,
+    [value.name, value.surname, value.pizza, JSON.stringify(value.items), value.total, value.date, value.time]
   );
   res.status(201).json({ order: toOrder(rows[0]) });
 }));
