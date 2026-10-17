@@ -34,4 +34,14 @@ const STAFF_USERS_SQL = `
   )
 `;
 
-module.exports = { hashPassword, verifyPassword, STAFF_USERS_SQL };
+// A signed-in browser. Only a hash of its cookie token is stored.
+const SESSIONS_SQL = `
+  CREATE TABLE IF NOT EXISTS sessions (
+    token_hash TEXT PRIMARY KEY,
+    username   TEXT NOT NULL,
+    expires_at TIMESTAMPTZ NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  )
+`;
+
+module.exports = { hashPassword, verifyPassword, STAFF_USERS_SQL, SESSIONS_SQL };
