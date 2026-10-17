@@ -105,9 +105,9 @@
   .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 22px 20px 20px; display: grid; gap: 16px; min-width: 0; }
   .panel h2 { margin: 0; font-family: var(--font-display); font-weight: 700; font-size: 1.6rem; letter-spacing: 0.03em; text-transform: uppercase; line-height: 1.1; }
 
-  .row { display: grid; gap: 14px; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); }
+  .row { display: grid; gap: 14px; grid-template-columns: repeat(auto-fit, minmax(min(100%, 130px), 1fr)); }
   .field { display: grid; gap: 6px; min-width: 0; align-content: start; }
-  label { font-size: 0.78rem; font-weight: 600; letter-spacing: 0.09em; text-transform: uppercase; color: var(--ink-2); }
+  label, .lbl { font-size: 0.78rem; font-weight: 600; letter-spacing: 0.09em; text-transform: uppercase; color: var(--ink-2); }
   input, select {
     width: 100%;
     min-width: 0;
@@ -119,10 +119,20 @@
     border: 1px solid var(--line);
     border-radius: 6px;
   }
-  input[type="date"], input[type="time"] { font-family: var(--font-mono); font-size: 0.95rem; }
+  /* Phone browsers give date and time boxes a fixed minimum width unless the native look is switched off. */
+  input[type="date"], input[type="time"] { display: block; -webkit-appearance: none; appearance: none; max-width: 100%; text-align: left; font-family: var(--font-mono); font-size: 0.95rem; }
+  input[type="date"]::-webkit-date-and-time-value, input[type="time"]::-webkit-date-and-time-value { text-align: left; min-height: 1.2em; }
   input[aria-invalid="true"], select[aria-invalid="true"] { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
   .err { margin: 0; font-size: 0.85rem; color: var(--accent); font-weight: 500; }
   .err:empty { display: none; }
+
+  .line { display: grid; grid-template-columns: minmax(0, 1fr) 76px 44px; gap: 8px; align-items: center; }
+  .line + .line { margin-top: 8px; }
+  .qty { text-align: center; font-family: var(--font-mono); font-weight: 600; padding: 0 6px; }
+  .line-remove { width: 44px; height: 46px; padding: 0; border: 1px solid var(--line); border-radius: 6px; background: var(--paper); color: var(--ink-2); font: 500 1.5rem/1 var(--font-body); cursor: pointer; }
+  .line-remove.off { visibility: hidden; }
+  .add-line { height: 42px; margin-top: 4px; border: 1px dashed var(--ink-2); border-radius: 6px; background: transparent; color: var(--ink); font: 700 1rem/1 var(--font-display); letter-spacing: 0.06em; text-transform: uppercase; cursor: pointer; }
+  .add-line:disabled { opacity: 0.5; cursor: not-allowed; }
 
   .submit {
     height: 50px;
@@ -197,8 +207,9 @@
   .ticket-main { padding: 14px 16px 10px; display: grid; gap: 4px; align-content: start; min-width: 0; }
   .who { margin: 0; font-family: var(--font-display); font-weight: 700; font-size: 1.55rem; line-height: 1.1; letter-spacing: 0.02em; text-transform: uppercase; overflow-wrap: anywhere; }
   .who small { display: block; font-weight: 500; font-size: 1rem; letter-spacing: 0.05em; color: var(--ink-2); }
-  .pizza { margin: 6px 0 0; display: flex; align-items: center; gap: 8px; font-weight: 600; overflow-wrap: anywhere; }
-  .pizza svg { flex: none; color: var(--accent); }
+  .items { list-style: none; margin: 6px 0 0; padding: 0; display: grid; gap: 4px; }
+  .items li { display: flex; align-items: baseline; gap: 10px; min-width: 0; font-weight: 600; overflow-wrap: anywhere; }
+  .qty-badge { flex: none; min-width: 2.4em; font-family: var(--font-mono); font-weight: 600; color: var(--accent); font-variant-numeric: tabular-nums; }
 
   .actions { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 16px; margin-top: 8px; }
   .btn-done, .btn-reopen {
@@ -236,9 +247,15 @@
   .empty strong { font-family: var(--font-display); font-size: 1.5rem; letter-spacing: 0.04em; text-transform: uppercase; color: var(--ink); }
   .empty p { margin: 0 auto; max-width: 40ch; }
 
-  @media (min-width: 761px) { .panel { position: sticky; top: 16px; } }
+  @media (min-width: 761px) { .panel { position: sticky; top: 16px; max-height: calc(100vh - 32px); overflow-y: auto; } }
   @media (max-width: 760px) { .layout { grid-template-columns: minmax(0, 1fr); } }
-  @media (max-width: 400px) { .ticket { --stub: 96px; } .when-time { font-size: 1.35rem; } }
+  @media (max-width: 480px) { .row-when { grid-template-columns: minmax(0, 1fr); } }
+  @media (max-width: 400px) {
+    .ticket { --stub: 104px; }
+    .ticket-stub { padding: 14px 6px; }
+    .when-time { font-size: 1.35rem; }
+    .chip { padding: 2px 6px; letter-spacing: 0.06em; white-space: nowrap; }
+  }
 </style>
 </head>
 <body>
@@ -268,15 +285,14 @@
         </div>
       </div>
 
-      <div class="field">
-        <label for="pizza">Pizza</label>
-        <select id="pizza" name="pizza" aria-describedby="err-pizza">
-          <option value="">Choose a pizza</option>
-        </select>
+      <div class="field" role="group" aria-labelledby="lbl-pizzas">
+        <span class="lbl" id="lbl-pizzas">Pizzas</span>
+        <div id="lines"></div>
+        <button type="button" class="add-line" id="addLine">+ Add another pizza</button>
         <p class="err" id="err-pizza"></p>
       </div>
 
-      <div class="row">
+      <div class="row row-when">
         <div class="field">
           <label for="date">Collection date</label>
           <input id="date" name="date" type="date" aria-describedby="err-date">
@@ -308,7 +324,9 @@
 (function () {
   var DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
   var MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-  var FIELDS = ["name", "surname", "pizza", "date", "time"];
+  var FIELDS = ["name", "surname", "date", "time"];
+  var maxQty = 20;   // the server sends its own limits and these follow it
+  var maxLines = 10;
   var POLL_MS = 10000;
   var GRACE_MS = 5 * 60 * 1000; // an order for "right now" is still allowed
 
@@ -339,8 +357,6 @@
     return e;
   }
 
-  var SLICE = '<svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"><path d="M3 5c6-3 12-3 18 0L12 21z"/><circle cx="10" cy="9" r="1.3" fill="currentColor" stroke="none"/><circle cx="14.5" cy="11" r="1.3" fill="currentColor" stroke="none"/></svg>';
-
   /* ---------- server ---------- */
   async function api(method, url, body) {
     var opts = { method: method, headers: {}, credentials: "same-origin" };
@@ -368,7 +384,8 @@
       state.banner = "";
       state.loaded = true;
       if (j.user) $("who").textContent = "Signed in as " + j.user;
-      if (j.menu && j.menu.length && $("pizza").options.length === 1) fillMenu(j.menu);
+      if (j.limits) { maxQty = j.limits.maxQty || maxQty; maxLines = j.limits.maxLines || maxLines; syncLines(); }
+      if (j.menu && j.menu.length && JSON.stringify(j.menu) !== JSON.stringify(state.menu)) fillMenu(j.menu);
     } catch (e) {
       if (e && e.signedOut) return;
       state.banner = "Cannot reach the server. Showing the last orders loaded; trying again shortly.";
@@ -376,13 +393,23 @@
     render(force);
   }
 
-  function fillMenu(menu) {
-    state.menu = menu;
-    menu.forEach(function (p) {
+  function fillOptions(sel) {
+    var keep = sel.value;
+    sel.textContent = "";
+    var first = document.createElement("option");
+    first.value = ""; first.textContent = "Choose a pizza";
+    sel.appendChild(first);
+    state.menu.forEach(function (p) {
       var o = document.createElement("option");
       o.value = p; o.textContent = p;
-      $("pizza").appendChild(o);
+      sel.appendChild(o);
     });
+    sel.value = keep;
+  }
+
+  function fillMenu(menu) {
+    state.menu = menu;
+    Array.prototype.forEach.call(document.querySelectorAll("#lines select"), fillOptions);
   }
 
   async function act(btn, fn) {
@@ -410,10 +437,14 @@
     who.appendChild(el("small", null, o.name));
     main.appendChild(who);
 
-    var pz = el("p", "pizza");
-    pz.insertAdjacentHTML("beforeend", SLICE);
-    pz.appendChild(el("span", null, o.pizza));
-    main.appendChild(pz);
+    var ul = el("ul", "items");
+    (o.items && o.items.length ? o.items : [{ pizza: o.pizza, qty: 1 }]).forEach(function (it) {
+      var li = el("li");
+      li.appendChild(el("span", "qty-badge", it.qty + "×"));
+      li.appendChild(el("span", null, it.pizza));
+      ul.appendChild(li);
+    });
+    main.appendChild(ul);
 
     var actions = el("div", "actions");
     var primary;
@@ -538,7 +569,9 @@
     if (!state.loaded) s = "";
     else if (!open.length) s = "All caught up";
     else {
-      s = open.length + " open";
+      var pizzas = 0;
+      open.forEach(function (o) { (o.items || [{ qty: 1 }]).forEach(function (it) { pizzas += it.qty; }); });
+      s = open.length + " open · " + pizzas + (pizzas === 1 ? " pizza" : " pizzas");
       if (overdue) s += " · " + overdue + " overdue";
       if (next) s += " · next pickup " + (relLabel(next.date) || dateLabel(next.date)) + " " + next.time;
     }
@@ -557,6 +590,7 @@
       $("err-" + f).textContent = errs[f] || "";
       if (errs[f]) $(f).setAttribute("aria-invalid", "true"); else $(f).removeAttribute("aria-invalid");
     });
+    $("err-pizza").textContent = errs.pizza || "";
   }
 
   function validate(v) {
@@ -564,7 +598,6 @@
     var today = ymd(new Date());
     if (!v.name) e.name = "Enter a name.";
     if (!v.surname) e.surname = "Enter a surname.";
-    if (!v.pizza) e.pizza = "Choose a pizza.";
     if (!v.date) e.date = "Pick a date.";
     else if (v.date < today) e.date = "That date has passed.";
     if (!v.time) e.time = "Pick a time.";
@@ -572,32 +605,97 @@
     return e;
   }
 
+  /* ---------- pizza lines ---------- */
+  function lineEls() { return Array.prototype.slice.call(document.querySelectorAll("#lines .line")); }
+
+  function syncLines() {
+    var lines = lineEls();
+    lines.forEach(function (l, i) {
+      l.querySelector("select").setAttribute("aria-label", "Pizza " + (i + 1));
+      var q = l.querySelector(".qty");
+      q.max = maxQty;
+      q.setAttribute("aria-label", "Quantity of pizza " + (i + 1));
+      var rm = l.querySelector(".line-remove");
+      rm.setAttribute("aria-label", "Remove pizza " + (i + 1));
+      rm.classList.toggle("off", lines.length === 1);
+    });
+    $("addLine").disabled = lines.length >= maxLines;
+  }
+
+  function addLine(focus) {
+    if (lineEls().length >= maxLines) return;
+    var line = el("div", "line");
+    var sel = document.createElement("select");
+    fillOptions(sel);
+    var qty = document.createElement("input");
+    qty.type = "number"; qty.className = "qty"; qty.min = 1; qty.step = 1; qty.value = 1;
+    qty.setAttribute("inputmode", "numeric");
+    var rm = el("button", "line-remove", "×");
+    rm.type = "button";
+    rm.addEventListener("click", function () { line.remove(); syncLines(); });
+    line.appendChild(sel);
+    line.appendChild(qty);
+    line.appendChild(rm);
+    $("lines").appendChild(line);
+    syncLines();
+    if (focus) sel.focus();
+  }
+
+  function resetLines() { $("lines").textContent = ""; addLine(false); }
+
+  function readItems() {
+    var items = [], problem = "", badEl = null;
+    lineEls().forEach(function (l) {
+      var sel = l.querySelector("select"), q = l.querySelector(".qty");
+      var n = Number(q.value);
+      sel.removeAttribute("aria-invalid");
+      q.removeAttribute("aria-invalid");
+      if (!sel.value) {
+        sel.setAttribute("aria-invalid", "true");
+        problem = problem || "Choose a pizza on every line.";
+        badEl = badEl || sel;
+      }
+      if (q.value === "" || !Number.isInteger(n) || n < 1 || n > maxQty) {
+        q.setAttribute("aria-invalid", "true");
+        problem = problem || "Quantity must be a whole number from 1 to " + maxQty + ".";
+        badEl = badEl || q;
+      }
+      items.push({ pizza: sel.value, qty: n });
+    });
+    return { items: items, problem: problem, badEl: badEl };
+  }
+
+  $("addLine").addEventListener("click", function () { addLine(true); });
+
   $("date").min = ymd(new Date());
   $("date").value = ymd(new Date());
 
   $("orderForm").addEventListener("submit", async function (ev) {
     ev.preventDefault();
     setStatus("", false);
+    var lines = readItems();
     var v = {
       name: $("name").value.trim(),
       surname: $("surname").value.trim(),
-      pizza: $("pizza").value,
+      items: lines.items,
       date: $("date").value,
       time: $("time").value
     };
     var errs = validate(v);
+    if (lines.problem) errs.pizza = lines.problem;
     showErrors(errs);
-    var bad = FIELDS.filter(function (f) { return errs[f]; })[0];
-    if (bad) { $(bad).focus(); return; }
+    var target = errs.name ? $("name") : errs.surname ? $("surname") : errs.pizza ? lines.badEl : errs.date ? $("date") : errs.time ? $("time") : null;
+    if (target) { target.focus(); return; }
 
     var btn = $("submitBtn");
     btn.disabled = true;
     try {
       await api("POST", "/api/orders", v);
-      setStatus("Order added for " + v.name + " " + v.surname + ".", false);
+      var total = v.items.reduce(function (sum, it) { return sum + it.qty; }, 0);
+      setStatus("Order added for " + v.name + " " + v.surname + " (" + total + (total === 1 ? " pizza" : " pizzas") + ").", false);
       $("name").value = "";
       $("surname").value = "";
-      $("pizza").value = "";
+      resetLines();
       $("time").value = "";
       state.tab = "open";
       $("name").focus();
@@ -618,6 +716,7 @@
   });
 
   /* ---------- start ---------- */
+  resetLines();
   render(true);
   load(true);
   setInterval(function () { if (!document.hidden) load(false); }, POLL_MS);
