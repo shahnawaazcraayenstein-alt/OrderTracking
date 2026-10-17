@@ -122,10 +122,43 @@
   /* Phone browsers give date and time boxes a fixed minimum width unless the native look is switched off. */
   input[type="date"], input[type="time"] { display: block; -webkit-appearance: none; appearance: none; max-width: 100%; text-align: left; font-family: var(--font-mono); font-size: 0.95rem; }
   input[type="date"]::-webkit-date-and-time-value, input[type="time"]::-webkit-date-and-time-value { text-align: left; min-height: 1.2em; }
-  /* On phones the chosen date and time sit in the middle of their boxes. */
+  /* On phones the chosen date and time sit in the exact middle of their boxes, across and up-and-down.
+     The box becomes a flex container so the value centres even where the browser ignores text-align,
+     and the calendar/clock icon is stretched invisibly over the whole box so it cannot push the value off-centre. */
   @media (max-width: 760px) {
-    input[type="date"], input[type="time"] { text-align: center; text-align-last: center; }
-    input[type="date"]::-webkit-date-and-time-value, input[type="time"]::-webkit-date-and-time-value { text-align: center; margin: 0 auto; }
+    input[type="date"], input[type="time"] {
+      position: relative;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+      text-align-last: center;
+      padding: 0 12px;
+      line-height: normal;
+    }
+    input[type="date"]::-webkit-datetime-edit, input[type="time"]::-webkit-datetime-edit {
+      flex: 0 1 auto;
+      width: auto;
+      padding: 0;
+      text-align: center;
+    }
+    input[type="date"]::-webkit-date-and-time-value, input[type="time"]::-webkit-date-and-time-value {
+      display: block;
+      width: auto;
+      min-height: 0;
+      margin: 0 auto;
+      padding: 0;
+      text-align: center;
+    }
+    input[type="date"]::-webkit-calendar-picker-indicator, input[type="time"]::-webkit-calendar-picker-indicator {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      margin: 0;
+      padding: 0;
+      opacity: 0;
+    }
   }
   input[aria-invalid="true"], select[aria-invalid="true"] { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
   .err { margin: 0; font-size: 0.85rem; color: var(--accent); font-weight: 500; }
