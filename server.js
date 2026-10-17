@@ -45,6 +45,7 @@ async function initDb() {
       name         TEXT NOT NULL,
       surname      TEXT NOT NULL,
       pizza        TEXT NOT NULL,
+      items        TEXT,
       pickup_date  TEXT NOT NULL,
       pickup_time  TEXT NOT NULL,
       status       TEXT NOT NULL DEFAULT 'open',
@@ -52,6 +53,8 @@ async function initDb() {
       completed_at TIMESTAMPTZ
     )
   `);
+  // Orders made before several pizzas were supported have no items; they are shown as one pizza.
+  await pool.query('ALTER TABLE orders ADD COLUMN IF NOT EXISTS items TEXT');
   await pool.query('CREATE INDEX IF NOT EXISTS orders_status_idx ON orders (status, pickup_date, pickup_time)');
   await pool.query(STAFF_USERS_SQL);
   await pool.query(SESSIONS_SQL);
@@ -88,12 +91,23 @@ async function seedLogins() {
   }
 }
 
+function parseItems(r) {
+  try {
+    const list = JSON.parse(r.items);
+    if (Array.isArray(list) && list.length) {
+      return list.map((i) => ({ pizza: String(i.pizza), qty: Number(i.qty) || 1 }));
+    }
+  } catch (e) { /* fall through to the single pizza */ }
+  return [{ pizza: r.pizza, qty: 1 }];
+}
+
 function toOrder(r) {
   return {
     id: r.id,
     name: r.name,
     surname: r.surname,
     pizza: r.pizza,
+    items: parseItems(r),
     date: r.pickup_date,
     time: r.pickup_time,
     status: r.status,
@@ -112,20 +126,45 @@ function isRealDate(s) {
   return dt.getUTCFullYear() === y && dt.getUTCMonth() === m - 1 && dt.getUTCDate() === d;
 }
 
+const MAX_LINES = 10; // different pizza lines on one order
+const MAX_QTY = 20;   // of one pizza on one order
+
+function summarize(items) {
+  return items.map((i) => (i.qty > 1 ? `${i.qty}x ${i.pizza}` : i.pizza)).join(', ');
+}
+
+// Accepts items: [{ pizza, qty }]. The older single "pizza" field still works. The same pizza on two lines is combined.
+function cleanItems(b) {
+  const raw = Array.isArray(b.items) ? b.items : (typeof b.pizza === 'string' ? [{ pizza: b.pizza, qty: 1 }] : []);
+  if (!raw.length) return { error: 'Add at least one pizza.' };
+  if (raw.length > MAX_LINES) return { error: `An order can have up to ${MAX_LINES} pizza lines.` };
+  const merged = new Map();
+  for (const it of raw) {
+    const pizza = it && typeof it.pizza === 'string' ? it.pizza : '';
+    const qty = it ? Number(it.qty) : NaN;
+    if (!MENU.includes(pizza)) return { error: 'Choose a pizza from the menu for every line.' };
+    if (!Number.isInteger(qty) || qty < 1 || qty > MAX_QTY) return { error: `Quantity must be a whole number from 1 to ${MAX_QTY}.` };
+    merged.set(pizza, (merged.get(pizza) || 0) + qty);
+  }
+  const items = [...merged].map(([pizza, qty]) => ({ pizza, qty }));
+  if (items.some((i) => i.qty > MAX_QTY)) return { error: `An order can have at most ${MAX_QTY} of the same pizza.` };
+  return { items };
+}
+
 function cleanOrder(body) {
   const b = body && typeof body === 'object' ? body : {};
   const name = typeof b.name === 'string' ? b.name.trim() : '';
   const surname = typeof b.surname === 'string' ? b.surname.trim() : '';
-  const pizza = typeof b.pizza === 'string' ? b.pizza : '';
   const date = b.date;
   const time = b.time;
 
   if (!name || name.length > 40) return { error: 'Enter a name of up to 40 characters.' };
   if (!surname || surname.length > 40) return { error: 'Enter a surname of up to 40 characters.' };
-  if (!MENU.includes(pizza)) return { error: 'Choose a pizza from the menu.' };
+  const cleaned = cleanItems(b);
+  if (cleaned.error) return { error: cleaned.error };
   if (!isRealDate(date)) return { error: 'Pick a valid collection date.' };
   if (typeof time !== 'string' || !/^([01]\d|2[0-3]):[0-5]\d$/.test(time)) return { error: 'Pick a valid collection time.' };
-  return { value: { name, surname, pizza, date, time } };
+  return { value: { name, surname, items: cleaned.items, pizza: summarize(cleaned.items), date, time } };
 }
 
 function parseId(raw) {
@@ -290,16 +329,16 @@ app.get('/api/orders', wrap(async (req, res) => {
     [cutoff]
   );
   res.set('Cache-Control', 'no-store');
-  res.json({ orders: rows.map(toOrder), menu: MENU, user: req.user });
+  res.json({ orders: rows.map(toOrder), menu: MENU, user: req.user, limits: { maxQty: MAX_QTY, maxLines: MAX_LINES } });
 }));
 
 app.post('/api/orders', wrap(async (req, res) => {
   const { value, error } = cleanOrder(req.body);
   if (error) return res.status(400).json({ error });
   const { rows } = await pool.query(
-    `INSERT INTO orders (name, surname, pizza, pickup_date, pickup_time)
-     VALUES ($1, $2, $3, $4, $5) RETURNING *`,
-    [value.name, value.surname, value.pizza, value.date, value.time]
+    `INSERT INTO orders (name, surname, pizza, items, pickup_date, pickup_time)
+     VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,
+    [value.name, value.surname, value.pizza, JSON.stringify(value.items), value.date, value.time]
   );
   res.status(201).json({ order: toOrder(rows[0]) });
 }));
