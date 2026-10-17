@@ -4,7 +4,7 @@ const path = require('path');
 const crypto = require('crypto');
 const express = require('express');
 const { Pool } = require('pg');
-const { hashPassword, verifyPassword, STAFF_USERS_SQL } = require('./auth');
+const { hashPassword, verifyPassword, STAFF_USERS_SQL, SESSIONS_SQL } = require('./auth');
 
 // ---------------------------------------------------------------------------
 // Settings. Edit MENU to change the pizzas offered on the order form.
@@ -22,6 +22,11 @@ const MENU = [
 
 const PORT = process.env.PORT || 3000;
 const COMPLETED_VISIBLE_DAYS = 7; // completed orders stay in the database; the screen shows the last 7 days
+
+// A sign-in lasts this many hours (set SESSION_HOURS in Railway to change it; 1 to 72), or until the person signs out.
+const SESSION_HOURS = Math.min(Math.max(Number(process.env.SESSION_HOURS) || 8, 1), 72);
+const SESSION_MS = SESSION_HOURS * 60 * 60 * 1000;
+const COOKIE_NAME = 'pob_session';
 
 if (!process.env.DATABASE_URL) {
   console.error('DATABASE_URL is not set. Add a Postgres database and set DATABASE_URL (see README.md).');
@@ -49,12 +54,14 @@ async function initDb() {
   `);
   await pool.query('CREATE INDEX IF NOT EXISTS orders_status_idx ON orders (status, pickup_date, pickup_time)');
   await pool.query(STAFF_USERS_SQL);
+  await pool.query(SESSIONS_SQL);
+  await pool.query('DELETE FROM sessions WHERE expires_at <= $1', [new Date()]);
 }
 
 // Logins named in the variables are created at startup if they do not exist yet:
-//   STAFF_USER + STAFF_PASSWORD           one login
+//   STAFF_USER + STAFF_PASSWORD               one login
 //   STAFF_LOGINS=anna:pass1234,ben:pass5678   any number of extra logins
-// An existing login is never changed by the variables; use scripts/add-user.js to reset a password.
+// An existing login is never changed by the variables.
 function loginsFromEnv() {
   const list = [];
   if (process.env.STAFF_PASSWORD) list.push([process.env.STAFF_USER || 'staff', process.env.STAFF_PASSWORD]);
@@ -76,6 +83,7 @@ async function seedLogins() {
     const existing = await pool.query('SELECT 1 FROM staff_users WHERE username = $1', [username]);
     if (existing.rows.length) continue;
     await pool.query('INSERT INTO staff_users (username, password_hash) VALUES ($1, $2)', [username, await hashPassword(password)]);
+    await pool.query('DELETE FROM sessions WHERE username = $1', [username]); // a re-created login starts signed out everywhere
     console.log(`Created staff login "${username}".`);
   }
 }
@@ -125,79 +133,153 @@ function parseId(raw) {
 }
 
 // ---------------------------------------------------------------------------
+// Sessions. A signed-in browser holds a random token in a cookie. Only a hash of
+// the token is stored in the sessions table, so a database leak cannot be replayed.
+// ---------------------------------------------------------------------------
+const sha = (s) => crypto.createHash('sha256').update(s).digest('hex');
+const TOKEN_FORMAT = /^[a-f0-9]{64}$/;
+
+function readToken(req) {
+  const header = req.headers.cookie || '';
+  for (const part of header.split(';')) {
+    const i = part.indexOf('=');
+    if (i < 0 || part.slice(0, i).trim() !== COOKIE_NAME) continue;
+    const value = part.slice(i + 1).trim();
+    return TOKEN_FORMAT.test(value) ? value : '';
+  }
+  return '';
+}
+
+// No Max-Age or Expires: the cookie is dropped when the browser closes. The server also ends
+// every session after SESSION_HOURS, whatever the browser does.
+function cookieFlags(req, extra) {
+  const flags = ['Path=/', 'HttpOnly', 'SameSite=Lax'].concat(extra || []);
+  if (req.secure) flags.push('Secure');
+  return flags.join('; ');
+}
+function setSessionCookie(req, res, token) {
+  res.append('Set-Cookie', `${COOKIE_NAME}=${token}; ${cookieFlags(req)}`);
+}
+function clearSessionCookie(req, res) {
+  res.append('Set-Cookie', `${COOKIE_NAME}=; ${cookieFlags(req, ['Max-Age=0', 'Expires=Thu, 01 Jan 1970 00:00:00 GMT'])}`);
+}
+
+async function sessionUser(req) {
+  const token = readToken(req);
+  if (!token) return null;
+  const { rows } = await pool.query(
+    `SELECT s.username FROM sessions s
+     JOIN staff_users u ON u.username = s.username
+     WHERE s.token_hash = $1 AND s.expires_at > $2`,
+    [sha(token), new Date()]
+  );
+  return rows.length ? rows[0].username : null;
+}
+
+// Wrong-password limits. Counted per address + username, so one person mistyping does not lock out
+// the whole restaurant (everyone shares one Wi-Fi address), plus a looser limit per address.
+const LOCKOUT_MS = 10 * 60 * 1000;
+const LIMIT_PER_USER = 10;
+const LIMIT_PER_IP = 50;
+const attempts = new Map(); // key -> { count, until }
+let dummyHash = null;
+
+function isLocked(key, limit, now) {
+  const r = attempts.get(key);
+  return !!r && r.until > now && r.count >= limit;
+}
+function addFailure(key, now) {
+  if (attempts.size > 2000) {
+    for (const [k, v] of attempts) if (v.until <= now) attempts.delete(k);
+  }
+  const r = attempts.get(key);
+  if (!r || r.until <= now) attempts.set(key, { count: 1, until: now + LOCKOUT_MS });
+  else r.count += 1;
+}
+
+// ---------------------------------------------------------------------------
 // App
 // ---------------------------------------------------------------------------
 const app = express();
 app.disable('x-powered-by');
 app.set('trust proxy', 1);
 
+const wrap = (fn) => (req, res, next) => fn(req, res).catch(next);
+
 app.get('/health', (req, res) => res.json({ ok: true }));
-
-// Staff login: usernames and hashed passwords live in the staff_users table.
-const AUTH_CACHE_MS = 60 * 1000;      // a verified login is trusted for a minute, so polling stays cheap
-const LOCKOUT_FAILS = 10;             // wrong logins allowed per address...
-const LOCKOUT_MS = 10 * 60 * 1000;    // ...within this window
-const authCache = new Map();          // sha256(Authorization header) -> expiry time
-const failures = new Map();           // ip -> { count, until }
-let hasUsers = false;
-let dummyHash = null;
-
-async function anyUsers() {
-  if (hasUsers) return true;
-  const { rows } = await pool.query('SELECT 1 FROM staff_users LIMIT 1');
-  hasUsers = rows.length > 0;
-  return hasUsers;
-}
-
-async function staffAuth(req, res, next) {
-  if (!(await anyUsers())) {
-    return res.status(503).type('text').send(
-      'No staff logins exist yet. In Railway, set STAFF_USER and STAFF_PASSWORD (8+ characters) on this service and redeploy, ' +
-      'or run: node scripts/add-user.js <username> <password>'
-    );
-  }
-
-  const now = Date.now();
-  const rec = failures.get(req.ip);
-  if (rec && rec.until > now && rec.count >= LOCKOUT_FAILS) {
-    return res.status(429).type('text').send('Too many wrong logins. Try again in a few minutes.');
-  }
-
-  const header = req.headers.authorization || '';
-  if (header.startsWith('Basic ')) {
-    const cacheKey = crypto.createHash('sha256').update(header).digest('hex');
-    if ((authCache.get(cacheKey) || 0) > now) return next();
-
-    const decoded = Buffer.from(header.slice(6), 'base64').toString('utf8');
-    const i = decoded.indexOf(':');
-    const username = (i >= 0 ? decoded.slice(0, i) : decoded).trim().toLowerCase();
-    const password = i >= 0 ? decoded.slice(i + 1) : '';
-
-    if (username && password && username.length <= 100 && password.length <= 200) {
-      const { rows } = await pool.query('SELECT password_hash FROM staff_users WHERE username = $1', [username]);
-      if (!rows.length && !dummyHash) dummyHash = await hashPassword('not-a-real-password');
-      const ok = await verifyPassword(password, rows.length ? rows[0].password_hash : dummyHash);
-      if (ok && rows.length) {
-        if (authCache.size > 500) authCache.clear();
-        authCache.set(cacheKey, now + AUTH_CACHE_MS);
-        failures.delete(req.ip);
-        return next();
-      }
-    }
-
-    if (!rec || rec.until <= now) failures.set(req.ip, { count: 1, until: now + LOCKOUT_MS });
-    else rec.count += 1;
-  }
-
-  res.set('WWW-Authenticate', 'Basic realm="Pizza Order Book", charset="UTF-8"');
-  return res.status(401).type('text').send('Staff login required.');
-}
-
-app.use((req, res, next) => staffAuth(req, res, next).catch(next));
 
 app.use(express.json({ limit: '10kb' }));
 
-const wrap = (fn) => (req, res, next) => fn(req, res).catch(next);
+// Login page: open to everyone. Someone already signed in goes straight to the orders.
+app.get('/login', wrap(async (req, res) => {
+  if (await sessionUser(req)) return res.redirect(302, '/');
+  res.set('Cache-Control', 'no-store');
+  res.sendFile(path.join(__dirname, 'login.html'));
+}));
+
+app.post('/api/login', wrap(async (req, res) => {
+  const b = req.body && typeof req.body === 'object' ? req.body : {};
+  const username = typeof b.username === 'string' ? b.username.trim().toLowerCase() : '';
+  const password = typeof b.password === 'string' ? b.password : '';
+  const now = Date.now();
+  const ipKey = `ip:${req.ip}`;
+  const userKey = `user:${req.ip}|${username.slice(0, 100)}`;
+
+  res.set('Cache-Control', 'no-store');
+  if (isLocked(ipKey, LIMIT_PER_IP, now) || isLocked(userKey, LIMIT_PER_USER, now)) {
+    return res.status(429).json({ error: 'Too many wrong attempts. Wait a few minutes and try again.' });
+  }
+
+  const anyUser = await pool.query('SELECT 1 FROM staff_users LIMIT 1');
+  if (!anyUser.rows.length) {
+    return res.status(503).json({ error: 'No staff logins exist yet. The owner needs to set STAFF_USER and STAFF_PASSWORD in Railway.' });
+  }
+
+  let ok = false;
+  if (username && password && username.length <= 100 && password.length <= 200) {
+    const { rows } = await pool.query('SELECT password_hash FROM staff_users WHERE username = $1', [username]);
+    if (!rows.length && !dummyHash) dummyHash = await hashPassword('not-a-real-password');
+    // Always hash-check, even for an unknown username, so the response time does not reveal which usernames exist.
+    const match = await verifyPassword(password, rows.length ? rows[0].password_hash : dummyHash);
+    ok = match && rows.length > 0;
+  }
+
+  if (!ok) {
+    addFailure(ipKey, now);
+    addFailure(userKey, now);
+    return res.status(401).json({ error: 'Wrong username or password.' });
+  }
+
+  attempts.delete(userKey);
+  const token = crypto.randomBytes(32).toString('hex');
+  await pool.query('DELETE FROM sessions WHERE expires_at <= $1', [new Date()]);
+  await pool.query(
+    'INSERT INTO sessions (token_hash, username, expires_at) VALUES ($1, $2, $3)',
+    [sha(token), username, new Date(now + SESSION_MS)]
+  );
+  setSessionCookie(req, res, token);
+  res.json({ ok: true });
+}));
+
+app.post('/api/logout', wrap(async (req, res) => {
+  const token = readToken(req);
+  if (token) await pool.query('DELETE FROM sessions WHERE token_hash = $1', [sha(token)]);
+  clearSessionCookie(req, res);
+  res.status(204).end();
+}));
+
+// Everything below needs a signed-in session.
+async function requireSession(req, res, next) {
+  const user = await sessionUser(req);
+  if (user) {
+    req.user = user;
+    return next();
+  }
+  if (req.path.startsWith('/api/')) return res.status(401).json({ error: 'Sign in required.' });
+  if (req.method === 'GET' || req.method === 'HEAD') return res.redirect(302, '/login');
+  return res.status(401).type('text').send('Sign in required.');
+}
+app.use((req, res, next) => requireSession(req, res, next).catch(next));
 
 app.get('/api/orders', wrap(async (req, res) => {
   const cutoff = new Date(Date.now() - COMPLETED_VISIBLE_DAYS * 24 * 60 * 60 * 1000);
@@ -208,7 +290,7 @@ app.get('/api/orders', wrap(async (req, res) => {
     [cutoff]
   );
   res.set('Cache-Control', 'no-store');
-  res.json({ orders: rows.map(toOrder), menu: MENU });
+  res.json({ orders: rows.map(toOrder), menu: MENU, user: req.user });
 }));
 
 app.post('/api/orders', wrap(async (req, res) => {
@@ -251,7 +333,9 @@ app.delete('/api/orders/:id', wrap(async (req, res) => {
 
 app.use('/api', (req, res) => res.status(404).json({ error: 'Not found.' }));
 
-app.use(express.static(path.join(__dirname, 'public')));
+app.use(express.static(path.join(__dirname, 'public'), {
+  setHeaders: (res) => res.set('Cache-Control', 'no-store'),
+}));
 
 // eslint-disable-next-line no-unused-vars
 app.use((err, req, res, next) => {
@@ -275,7 +359,7 @@ async function start() {
       await new Promise((r) => setTimeout(r, 2500));
     }
   }
-  app.listen(PORT, '0.0.0.0', () => console.log(`Pizza Order Book listening on port ${PORT}`));
+  app.listen(PORT, '0.0.0.0', () => console.log(`Pizza Order Book listening on port ${PORT} (sign-ins last ${SESSION_HOURS} hours)`));
 }
 
 start();
