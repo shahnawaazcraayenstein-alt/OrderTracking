@@ -122,6 +122,11 @@
   /* Phone browsers give date and time boxes a fixed minimum width unless the native look is switched off. */
   input[type="date"], input[type="time"] { display: block; -webkit-appearance: none; appearance: none; max-width: 100%; text-align: left; font-family: var(--font-mono); font-size: 0.95rem; }
   input[type="date"]::-webkit-date-and-time-value, input[type="time"]::-webkit-date-and-time-value { text-align: left; min-height: 1.2em; }
+  /* On phones the chosen date and time sit in the middle of their boxes. */
+  @media (max-width: 760px) {
+    input[type="date"], input[type="time"] { text-align: center; text-align-last: center; }
+    input[type="date"]::-webkit-date-and-time-value, input[type="time"]::-webkit-date-and-time-value { text-align: center; margin: 0 auto; }
+  }
   input[aria-invalid="true"], select[aria-invalid="true"] { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
   .err { margin: 0; font-size: 0.85rem; color: var(--accent); font-weight: 500; }
   .err:empty { display: none; }
@@ -211,6 +216,11 @@
   .items li { display: flex; align-items: baseline; gap: 10px; min-width: 0; font-weight: 600; overflow-wrap: anywhere; }
   .qty-badge { flex: none; min-width: 2.4em; font-family: var(--font-mono); font-weight: 600; color: var(--accent); font-variant-numeric: tabular-nums; }
 
+  .price { margin: 6px 0 0; font-family: var(--font-mono); font-weight: 600; font-size: 1.05rem; font-variant-numeric: tabular-nums; }
+  .price span { margin-right: 8px; font-family: var(--font-body); font-size: 0.78rem; font-weight: 600; letter-spacing: 0.09em; text-transform: uppercase; color: var(--ink-2); }
+  .total-box { margin: 0; padding: 12px 14px; border: 1px solid var(--ok); border-radius: 6px; background: var(--ok-bg); color: var(--ink); display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+  .total-box span { font-size: 0.78rem; font-weight: 600; letter-spacing: 0.09em; text-transform: uppercase; color: var(--ink-2); }
+  .total-box strong { font-family: var(--font-mono); font-size: 1.5rem; font-variant-numeric: tabular-nums; }
   .actions { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 16px; margin-top: 8px; }
   .btn-done, .btn-reopen {
     height: 42px;
@@ -307,6 +317,7 @@
 
       <button class="submit" id="submitBtn" type="submit">Add order</button>
       <p class="status" id="formStatus" aria-live="polite"></p>
+      <p class="total-box" id="totalBox" role="status" hidden><span>Order total</span><strong id="totalAmt"></strong></p>
     </form>
 
     <section class="rail" aria-label="Orders">
@@ -330,7 +341,7 @@
   var POLL_MS = 10000;
   var GRACE_MS = 5 * 60 * 1000; // an order for "right now" is still allowed
 
-  var state = { orders: [], menu: [], tab: "open", loaded: false, banner: "", sig: "", lastKey: "" };
+  var state = { orders: [], menu: [], prices: {}, tab: "open", loaded: false, banner: "", sig: "", lastKey: "" };
 
   function $(id) { return document.getElementById(id); }
   function pad(n) { return n < 10 ? "0" + n : "" + n; }
@@ -349,6 +360,7 @@
     var tm = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
     return s === ymd(tm) ? "Tomorrow" : "";
   }
+  function money(n) { return "R" + n; }
   function clock(iso) { var d = new Date(iso); return pad(d.getHours()) + ":" + pad(d.getMinutes()); }
   function el(tag, cls, text) {
     var e = document.createElement(tag);
@@ -385,7 +397,8 @@
       state.loaded = true;
       if (j.user) $("who").textContent = "Signed in as " + j.user;
       if (j.limits) { maxQty = j.limits.maxQty || maxQty; maxLines = j.limits.maxLines || maxLines; syncLines(); }
-      if (j.menu && j.menu.length && JSON.stringify(j.menu) !== JSON.stringify(state.menu)) fillMenu(j.menu);
+      if (j.prices) state.prices = j.prices;
+      if (j.menu && j.menu.length && (JSON.stringify(j.menu) !== JSON.stringify(state.menu) || JSON.stringify(j.prices) !== state.priceSig)) { state.priceSig = JSON.stringify(j.prices); fillMenu(j.menu); }
     } catch (e) {
       if (e && e.signedOut) return;
       state.banner = "Cannot reach the server. Showing the last orders loaded; trying again shortly.";
@@ -401,7 +414,7 @@
     sel.appendChild(first);
     state.menu.forEach(function (p) {
       var o = document.createElement("option");
-      o.value = p; o.textContent = p;
+      o.value = p; o.textContent = state.prices[p] != null ? p + " – " + money(state.prices[p]) : p;
       sel.appendChild(o);
     });
     sel.value = keep;
@@ -445,6 +458,13 @@
       ul.appendChild(li);
     });
     main.appendChild(ul);
+
+    if (o.total != null) {
+      var pr = el("p", "price");
+      pr.appendChild(el("span", null, "Total"));
+      pr.appendChild(document.createTextNode(money(o.total)));
+      main.appendChild(pr);
+    }
 
     var actions = el("div", "actions");
     var primary;
@@ -673,6 +693,7 @@
   $("orderForm").addEventListener("submit", async function (ev) {
     ev.preventDefault();
     setStatus("", false);
+    $("totalBox").hidden = true;
     var lines = readItems();
     var v = {
       name: $("name").value.trim(),
@@ -690,9 +711,13 @@
     var btn = $("submitBtn");
     btn.disabled = true;
     try {
-      await api("POST", "/api/orders", v);
+      var saved = await api("POST", "/api/orders", v);
       var total = v.items.reduce(function (sum, it) { return sum + it.qty; }, 0);
       setStatus("Order added for " + v.name + " " + v.surname + " (" + total + (total === 1 ? " pizza" : " pizzas") + ").", false);
+      if (saved.order && saved.order.total != null) {
+        $("totalAmt").textContent = money(saved.order.total);
+        $("totalBox").hidden = false;
+      }
       $("name").value = "";
       $("surname").value = "";
       resetLines();
