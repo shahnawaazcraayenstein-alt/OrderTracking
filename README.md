@@ -1,6 +1,6 @@
 # Pizza Order Book
 
-Order tracker for restaurant staff. Staff sign in, add an order (name, surname, pizza, collection date and time), see open orders sorted by collection time, and mark each one completed once it has gone out. Orders, staff logins and sign-ins are stored in Postgres, so every device sees the same data.
+Order tracker for restaurant staff. Staff sign in, add an order (name, surname, one or more pizzas with a quantity for each, collection date and time), see open orders sorted by collection time, and mark each one completed once it has gone out. Orders, staff logins and sign-ins are stored in Postgres, so every device sees the same data.
 
 ## Deploy on Railway
 
