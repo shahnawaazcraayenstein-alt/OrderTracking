@@ -4,7 +4,7 @@
 // Creates a staff login, or resets the password if the username already exists.
 
 const { Pool } = require('pg');
-const { hashPassword, STAFF_USERS_SQL } = require('../auth');
+const { hashPassword, STAFF_USERS_SQL, SESSIONS_SQL } = require('../auth');
 
 async function main() {
   const rawUser = process.argv[2];
@@ -30,13 +30,15 @@ async function main() {
 
   try {
     await pool.query(STAFF_USERS_SQL);
+    await pool.query(SESSIONS_SQL);
     const hash = await hashPassword(password);
     const updated = await pool.query('UPDATE staff_users SET password_hash = $2 WHERE username = $1', [username, hash]);
     if (updated.rowCount === 0) {
       await pool.query('INSERT INTO staff_users (username, password_hash) VALUES ($1, $2)', [username, hash]);
       console.log(`Created staff login "${username}".`);
     } else {
-      console.log(`Updated the password for "${username}".`);
+      await pool.query('DELETE FROM sessions WHERE username = $1', [username]); // a new password signs the person out everywhere
+      console.log(`Updated the password for "${username}". They are signed out and must sign in again.`);
     }
   } finally {
     await pool.end();
